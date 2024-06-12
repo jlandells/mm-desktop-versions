@@ -1,4 +1,4 @@
-# Session Browser Version Tally Utility
+# Mattermost Browser Version Tally Utility
 
 This Go utility connects to a Mattermost database, extracts session data from a JSON field, and counts the number of sessions running different versions of a desktop application. The configuration is read from a JSON file using Viper, and you can specify a different config file using a command-line flag.
 
@@ -26,6 +26,9 @@ The configuration file should be in JSON format. Below is an example `config.jso
     }
 }
 ```
+
+> [!IMPORTANT]
+> The `type` must be either `postgresql` or `mysql`.  No other database types are supported.
 
 ## Usage
 
