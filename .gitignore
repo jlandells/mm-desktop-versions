@@ -20,3 +20,10 @@
 # Go workspace file
 go.work
 go.work.sum
+pg_config.json
+mysql_config.json
+
+# Compiled Binaries
+mm-desktop-versions_*
+
+.vscode/launch.json
