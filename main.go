@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"regexp"
 	"strings"
 
 	_ "github.com/go-sql-driver/mysql"
@@ -25,6 +26,12 @@ type Config struct {
 		User     string `json:"user"`
 		Password string `json:"password"`
 	} `json:"db"`
+}
+
+type Props struct {
+	Browser  string `json:"browser"`
+	OS       string `json:"os"`
+	IsMobile string `json:"isMobile"`
 }
 
 func main() {
@@ -82,11 +89,9 @@ func main() {
 	}
 	defer rows.Close()
 
-	type Props struct {
-		Browser string `json:"browser"`
-	}
-
-	versionCount := make(map[string]int)
+	desktopVersionCount := make(map[string]map[string]int)
+	mobileVersionCount := make(map[string]map[string]int)
+	mobileAppRegex := regexp.MustCompile(`Mobile App/([\d.]+)`)
 
 	for rows.Next() {
 		var props string
@@ -100,11 +105,26 @@ func main() {
 			continue
 		}
 
-		if strings.Contains(propData.Browser, "Desktop App") {
+		if propData.IsMobile == "true" {
+			matches := mobileAppRegex.FindStringSubmatch(propData.Browser)
+			if len(matches) == 2 {
+				version := matches[1]
+				if strings.Contains(version, "+") {
+					version = strings.Split(version, "+")[0]
+				}
+				if mobileVersionCount[version] == nil {
+					mobileVersionCount[version] = make(map[string]int)
+				}
+				mobileVersionCount[version][propData.OS]++
+			}
+		} else if strings.Contains(propData.Browser, "Desktop App") {
 			parts := strings.Split(propData.Browser, "/")
 			if len(parts) == 2 {
 				version := parts[1]
-				versionCount[version]++
+				if desktopVersionCount[version] == nil {
+					desktopVersionCount[version] = make(map[string]int)
+				}
+				desktopVersionCount[version][propData.OS]++
 			}
 		}
 	}
@@ -113,9 +133,34 @@ func main() {
 		log.Fatalf("Error iterating over rows: %v", err)
 	}
 
-	// Print the tally
-	fmt.Printf("Mattermost Desktop App Versions Found:\n")
-	for version, count := range versionCount {
-		fmt.Printf("    %s - %d\n", version, count)
+	hasDesktopApps := len(desktopVersionCount) > 0
+	hasMobileApps := len(mobileVersionCount) > 0
+
+	if !hasDesktopApps && !hasMobileApps {
+		fmt.Println("No Mattermost Apps Found")
+	} else {
+		if hasDesktopApps {
+			fmt.Println("Mattermost Desktop App Versions Found:")
+			for version, osCounts := range desktopVersionCount {
+				for os, count := range osCounts {
+					fmt.Printf("  %s (%s) - %d\n", version, os, count)
+				}
+			}
+		} else {
+			fmt.Println("No Mattermost Desktop Apps Found")
+		}
+
+		fmt.Printf("\n")
+
+		if hasMobileApps {
+			fmt.Println("Mattermost Mobile App Versions Found:")
+			for version, osCounts := range mobileVersionCount {
+				for os, count := range osCounts {
+					fmt.Printf("  %s (%s) - %d\n", version, os, count)
+				}
+			}
+		} else {
+			fmt.Println("No Mattermost Mobile Apps Found")
+		}
 	}
 }

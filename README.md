@@ -1,14 +1,14 @@
 # Mattermost Browser Version Tally Utility
 
-This Go utility connects to a Mattermost database, extracts session data from a JSON field, and counts the number of sessions running different versions of a desktop application. The configuration is read from a JSON file using Viper, and you can specify a different config file using a command-line flag.
+This Go utility connects to a Mattermost database, extracts session data from a JSON field, and counts the number of sessions running different versions of a desktop or mobile application. The configuration is read from a JSON file using Viper, and you can specify a different config file using a command-line flag.
 
 ## Features
 
 - Reads database configuration from a JSON file.
 - Connects to either PostgreSQL or MySQL databases.
 - Queries session data and extracts JSON properties.
-- Filters and tallies desktop app versions from session data.
-- Outputs the tally of different desktop app versions.
+- Filters and tallies desktop and mobile app versions for each OS from session data.
+- Outputs the tally of different app versions.
 
 ## Configuration
 
@@ -28,7 +28,7 @@ The configuration file should be in JSON format. Below is an example `config.jso
 ```
 
 > [!IMPORTANT]
-> The `type` must be either `postgresql` or `mysql`.  No other database types are supported.
+> The `type` **must** be either `postgresql` or `mysql`.  No other database types are supported.
 
 ## Usage
 
@@ -52,14 +52,23 @@ The configuration file should be in JSON format. Below is an example `config.jso
 
 ### Sample Output
 
-The output will be a tally of different versions of the desktop application found in the session data:
+The output will be a tally of different versions of the desktop or mobile application found in the session data:
 ```
 Mattermost Desktop App Versions Found:
-    5.3.0 - 23
-    5.4.0 - 46
-    5.5.0 - 87
-    5.5.3 - 129
-    5.8.0 - 5
+  5.3.0 (Windows) - 23
+  5.4.0 (Windows) - 46
+  5.5.0 (Windows) - 67
+  5.5.0 (Mac OS) - 20
+  5.5.3 (Windows) - 89
+  5.5.3 (Mac OS) - 24
+  5.5.3 (Linux) - 3
+  5.8.0 (Windows) - 5
+  5.8.0 (Mac OS) - 6
+
+Mattermost Mobile App Versions Found:
+  2.13.4 (iOS) - 234
+  2.13.4 (Android) - 43
+  2.17.0 (iOS) - 64
 ```
 
 ## Installation
