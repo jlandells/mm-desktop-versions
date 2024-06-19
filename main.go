@@ -2,11 +2,13 @@ package main
 
 import (
 	"database/sql"
+	"encoding/csv"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -16,6 +18,8 @@ import (
 )
 
 var Version = "development" // default value
+
+var defaultOutputFile = "users.csv"
 
 type Config struct {
 	DB struct {
@@ -116,6 +120,202 @@ func connectDatabase(config *Config) (*sql.DB, error) {
 	}
 
 	return db, nil
+}
+
+func splitVersion(version string) (int, int, int, error) {
+	parts := strings.Split(version, ".")
+	if len(parts) != 3 {
+		return 0, 0, 0, fmt.Errorf("invalid version format")
+	}
+
+	major, err := strconv.Atoi(parts[0])
+	if err != nil {
+		return 0, 0, 0, err
+	}
+
+	minor, err := strconv.Atoi(parts[1])
+	if err != nil {
+		return 0, 0, 0, err
+	}
+
+	patch, err := strconv.Atoi(parts[2])
+	if err != nil {
+		return 0, 0, 0, err
+	}
+
+	return major, minor, patch, nil
+}
+
+func isOlderOrEqual(version, lookupVersion string) (bool, error) {
+	vMajor, vMinor, vPatch, err := splitVersion(version)
+	if err != nil {
+		return false, err
+	}
+
+	lvMajor, lvMinor, lvPatch, err := splitVersion(lookupVersion)
+	if err != nil {
+		return false, err
+	}
+
+	if vMajor < lvMajor {
+		return true, nil
+	}
+	if vMajor > lvMajor {
+		return false, nil
+	}
+
+	// If major versions are equal, compare minor versions
+	if vMinor < lvMinor {
+		return true, nil
+	}
+	if vMinor > lvMinor {
+		return false, nil
+	}
+
+	// If minor versions are equal, compare patch versions
+	return vPatch <= lvPatch, nil
+}
+
+func doLookup(db *sql.DB, dbType string, outputFilename string, lookupVersion string) error {
+
+	DebugPrint("Running doLookup.  Writing output to: " + outputFilename + " - Processing desktop version prior to " + lookupVersion)
+
+	// Create the output file
+	file, err := os.Create(outputFilename)
+	if err != nil {
+		LogMessage(errorLevel, "Failed to create CSV file: "+err.Error())
+		return err
+	}
+	defer file.Close()
+
+	// Prepare the CSv writer
+	writer := csv.NewWriter(file)
+	defer writer.Flush()
+
+	// Write the CSV header row
+	header := []string{"Version", "OS", "Username", "Email", "First Name", "Last Name"}
+	if err := writer.Write(header); err != nil {
+		LogMessage(errorLevel, "Failed to write header row to CSV: "+err.Error())
+		return err
+	}
+
+	// We need the current epoch to ensure we only retrieve sessions that are still active
+	currentEpochMillis := time.Now().UnixMilli()
+
+	query := ""
+	if dbType == "postgresql" {
+		query = fmt.Sprintf("SELECT userid, props, deviceid, expiresat FROM sessions WHERE props != '{}' AND (expiresat > %d OR expiresat = 0)", currentEpochMillis)
+	} else if dbType == "mysql" {
+		query = fmt.Sprintf("SELECT UserId, Props, DeviceId, ExpiresAt FROM Sessions WHERE JSON_LENGTH(props) > 0 AND (ExpiresAt > %d OR ExpiresAt = 0)", currentEpochMillis)
+	}
+
+	rows, err := db.Query(query)
+	if err != nil {
+		errMsg := fmt.Sprintf("Error executing query: %v", err)
+		LogMessage(errorLevel, errMsg)
+		return err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var props, deviceID string
+		var expiresAt int64
+		var userID string
+		if dbType == "postgresql" {
+			if err := rows.Scan(&userID, &props, &deviceID, &expiresAt); err != nil {
+				errMsg := fmt.Sprintf("Error scanning PostgreSQL row: %v", err)
+				LogMessage(errorLevel, errMsg)
+				return err
+			}
+		} else if dbType == "mysql" {
+			if err := rows.Scan(&userID, &props, &deviceID, &expiresAt); err != nil {
+				errMsg := fmt.Sprintf("Error scanning MySQL row: %v", err)
+				LogMessage(errorLevel, errMsg)
+				return err
+			}
+		}
+
+		var propData Props
+		if err := json.Unmarshal([]byte(props), &propData); err != nil {
+			errMsg := fmt.Sprintf("Error unmarshalling JSON: %v", err)
+			LogMessage(warningLevel, errMsg)
+			continue
+		}
+		propData.DeviceID = deviceID
+
+		if propData.IsMobile == "true" || deviceID != "" || propData.OS == "Android" || propData.OS == "iOS" {
+			DebugPrint("Mobile device.  Skipping for lookup.")
+		} else if strings.Contains(propData.Browser, "Desktop App") {
+			version := ""
+			processRow := false
+			var err error
+			parts := strings.Split(propData.Browser, "/")
+			if len(parts) == 2 {
+				version = parts[1]
+				if version == "0.0" {
+					debugMessage := fmt.Sprintf("Troubleshooting: %s", props)
+					DebugPrint(debugMessage)
+					continue
+				}
+
+				processRow, err = isOlderOrEqual(version, lookupVersion)
+				if err != nil {
+					LogMessage(warningLevel, "Unable to parse version string: "+version)
+					processRow = true
+				}
+			}
+
+			if processRow {
+				userQuery := ""
+				if dbType == "postgresql" {
+					userQuery = fmt.Sprintf("SELECT username, email, firstname, lastname FROM users WHERE id = '%s'", userID)
+				} else if dbType == "mysql" {
+					userQuery = fmt.Sprintf("SELECT Username, Email, FirstName, LastName FROM Users WHERE Id = '%s'", userID)
+				}
+
+				userRows, err := db.Query(userQuery)
+				if err != nil {
+					errMsg := fmt.Sprintf("Error executing query: %v", err)
+					LogMessage(errorLevel, errMsg)
+					return err
+				}
+				defer userRows.Close()
+
+				for userRows.Next() {
+					var username, email, firstname, lastname string
+					if dbType == "postgresql" {
+						if err := userRows.Scan(&username, &email, &firstname, &lastname); err != nil {
+							errMsg := fmt.Sprintf("Error scanning PostgreSQL row: %v", err)
+							LogMessage(errorLevel, errMsg)
+							return err
+						}
+					} else if dbType == "mysql" {
+						if err := userRows.Scan(&username, &email, &firstname, &lastname); err != nil {
+							errMsg := fmt.Sprintf("Error scanning MySQL row: %v", err)
+							LogMessage(errorLevel, errMsg)
+							return err
+						}
+					}
+
+					csvRecord := []string{version, propData.OS, username, email, firstname, lastname}
+
+					// Write the record
+					if err := writer.Write(csvRecord); err != nil {
+						warningMessage := fmt.Sprintf("Failed to write record to CSV! Version: %s, OS: %s, Usermame: %s, Email: %s, Name: %s %s",
+							version,
+							propData.OS,
+							username,
+							email,
+							firstname,
+							lastname)
+						LogMessage(warningLevel, warningMessage)
+					}
+				}
+			}
+		}
+	}
+
+	return nil
 }
 
 func processDatabase(db *sql.DB, dbType string) (VersionCount, VersionCount, error) {
@@ -227,8 +427,20 @@ func printResults(desktopVersionCount, mobileVersionCount VersionCount) {
 	hasDesktopApps := len(desktopVersionCount) > 0
 	hasMobileApps := len(mobileVersionCount) > 0
 
-	totalDesktopClients := len(desktopVersionCount)
-	totalMobileClients := len(mobileVersionCount)
+	totalDesktopClients := 0
+	totalMobileClients := 0
+
+	for _, desktopVersionInfos := range desktopVersionCount {
+		for _, desktopVersionInfo := range desktopVersionInfos {
+			totalDesktopClients += desktopVersionInfo.Count
+		}
+	}
+	for _, mobileVersionInfos := range mobileVersionCount {
+		for _, mobileVersionInfo := range mobileVersionInfos {
+			totalMobileClients += mobileVersionInfo.Count
+		}
+	}
+
 	totalActiveClients := totalDesktopClients + totalMobileClients
 
 	if !hasDesktopApps && !hasMobileApps {
@@ -265,7 +477,13 @@ func printResults(desktopVersionCount, mobileVersionCount VersionCount) {
 func main() {
 	// Define command-line flag
 	var showVersion bool
+	var lookupMode bool
+	var lookupVersion string
+	var outputFile string
 	configFile := flag.String("config", "config.json", "path to config file")
+	flag.BoolVar(&lookupMode, "lookup", false, "lookup desktop users prior to an existing version")
+	flag.StringVar(&lookupVersion, "ver", "", "[required for lookup] user with desktop clients of this version and older will be returned")
+	flag.StringVar(&outputFile, "outfile", defaultOutputFile, "[optional] Specify an alternative output CSV filename when using lookup mode.  Default:"+defaultOutputFile)
 	flag.BoolVar(&showVersion, "version", false, "show version infomration and exit")
 	flag.BoolVar(&debugMode, "debug", false, "run the utility in debug mode for additional output")
 	flag.Parse()
@@ -273,6 +491,15 @@ func main() {
 	if showVersion {
 		fmt.Printf("Version: %s\n", Version)
 		os.Exit(1)
+	}
+
+	if lookupMode {
+		if lookupVersion == "" {
+			LogMessage(errorLevel, "A desktop client version is required for lookup mode")
+			flag.Usage()
+			os.Exit(1)
+		}
+		LogMessage(infoLevel, "Running in lookup mode, for desktop version v"+lookupVersion+" and earlier.  Writing results to: "+outputFile)
 	}
 
 	config, cfgErr := loadConfig(*configFile)
@@ -287,11 +514,20 @@ func main() {
 	}
 	defer db.Close()
 
-	desktopVersionCount, mobileVersionCount, processErr := processDatabase(db, config.DB.Type)
-	if processErr != nil {
-		LogMessage(errorLevel, "Error processing database")
-		os.Exit(4)
-	}
+	if lookupMode {
+		DebugPrint("Staring lookup")
+		lookupErr := doLookup(db, config.DB.Type, outputFile, lookupVersion)
+		if lookupErr != nil {
+			LogMessage(errorLevel, "Error processing lookup")
+			os.Exit(10)
+		}
+	} else {
+		desktopVersionCount, mobileVersionCount, processErr := processDatabase(db, config.DB.Type)
+		if processErr != nil {
+			LogMessage(errorLevel, "Error processing database")
+			os.Exit(4)
+		}
 
-	printResults(desktopVersionCount, mobileVersionCount)
+		printResults(desktopVersionCount, mobileVersionCount)
+	}
 }
