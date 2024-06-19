@@ -477,6 +477,7 @@ func printResults(desktopVersionCount, mobileVersionCount VersionCount) {
 func main() {
 	// Define command-line flag
 	var showVersion bool
+	var showHelp bool
 	var lookupMode bool
 	var lookupVersion string
 	var outputFile string
@@ -485,12 +486,18 @@ func main() {
 	flag.StringVar(&lookupVersion, "ver", "", "[required for lookup] user with desktop clients of this version and older will be returned")
 	flag.StringVar(&outputFile, "outfile", defaultOutputFile, "[optional] Specify an alternative output CSV filename when using lookup mode.  Default:"+defaultOutputFile)
 	flag.BoolVar(&showVersion, "version", false, "show version infomration and exit")
+	flag.BoolVar(&showHelp, "help", false, "show help and exit")
 	flag.BoolVar(&debugMode, "debug", false, "run the utility in debug mode for additional output")
 	flag.Parse()
 
 	if showVersion {
 		fmt.Printf("Version: %s\n", Version)
 		os.Exit(1)
+	}
+
+	if showHelp {
+		flag.Usage()
+		os.Exit(99)
 	}
 
 	if lookupMode {
