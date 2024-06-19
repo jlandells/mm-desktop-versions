@@ -71,6 +71,20 @@ Mattermost Mobile App Versions Found:
   2.17.0 (iOS) - 64
 ```
 
+### Lookup Mode
+
+This utility offers an additional run mode that will detect all users with active sessions and list them in a CSV file.
+
+To use this mode, you need to specify a specific version of the Mattermost Desktop App, and the utility will return all matches of that version and earlier:
+- Ensure you have the configuration file (`config.json`) in the same directory as the executable or specify the path to the configuration file using the `-config` flag.
+- Run the utility with and specify lookup mode and the version:
+```sh
+./mm-desktop-versions-<arch> -lookup -ver=5.5.0
+```
+
+A CSV file named `users.csv` will be generated.  You can specify an alternative filename using the `-outfile=<filename>` parameter.
+
+
 ## Installation
 
 - Download the appropriate executable for your architecture (`mm-desktop-versions-<arch>`).

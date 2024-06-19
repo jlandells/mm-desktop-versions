@@ -27,3 +27,4 @@ mysql_config.json
 mm-desktop-versions_*
 
 .vscode/launch.json
+users.csv
